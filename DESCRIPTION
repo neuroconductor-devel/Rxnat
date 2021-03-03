@@ -1,19 +1,15 @@
 Package: Rxnat
 Type: Package
 Version: 1.0.14
-Title: Queries and Extracts Images from Extensible Neuroimaging Archive Toolkit Public/Private Datasets
-Description: Allows communication with Extensible Neuroimaging Archive Toolkit <https://www.xnat.org>. 
-  'Rxnat' is using the 'XNAT' REST API to perform data queries and download images.
+Title: Queries and Extracts Images from Extensible Neuroimaging Archive
+        Toolkit Public/Private Datasets
+Description: Allows communication with Extensible Neuroimaging Archive
+        Toolkit <https://www.xnat.org>. 'Rxnat' is using the 'XNAT'
+        REST API to perform data queries and download images.
 Authors@R: person("Adi", "Gherman", ,"adig@jhu.edu", c("aut", "cre"))
 Maintainer: Adi Gherman <adig@jhu.edu>
 Imports: RCurl, httr, utils, dplyr, tibble
-Suggests: 
-    testthat,
-    knitr,
-    rmarkdown,
-    covr,
-    scales,
-    devtools
+Suggests: testthat, knitr, rmarkdown, covr, scales, devtools
 License: GPL-2
 Encoding: UTF-8
 LazyData: true
@@ -21,3 +17,5 @@ ByteCompile: true
 RoxygenNote: 7.1.1
 VignetteBuilder: knitr
 BugReports: https://github.com/adigherman/Rxnat/issues
+Repository: Neuroconductor-Devel
+biocViews: 

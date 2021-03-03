@@ -9,3 +9,7 @@
 paper_code.R
 use_case.R
 ^\.github$
+^DESCRIPTION\.bak$
+^autoci\.yml$
+^autoci_pkgdown\.yml$
+^tic\.R$
