@@ -1,0 +1,34 @@
+on:
+  push:
+    tags:
+       - '*.[sc]'
+  workflow_dispatch:
+
+name: Pkgdown
+
+jobs:
+  pkgdown:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+      - uses: r-lib/actions/setup-pandoc@v2
+      - name: Setup git identity
+        run: |
+          git config user.name adigherman
+          git config user.email adig@jhu.edu
+      - name: Install system dependencies
+        run: |
+          sudo apt-get install libcurl4-openssl-dev libharfbuzz-dev libfribidi-dev
+      - name: Install R dependencies
+        run: |
+          install.packages("pak")
+          pak::pkg_install("pkgdown", dependencies = TRUE)
+          pak::local_install_dev_deps()
+          pak::pkg_install("R.utils")
+        shell: Rscript {0}
+      - name: Install package
+        run: R CMD INSTALL .
+      - name: Deploy package
+        run: pkgdown::deploy_to_branch(new_process = FALSE, clean = TRUE)
+        shell: Rscript {0}

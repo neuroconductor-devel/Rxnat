@@ -1,0 +1,208 @@
+on:
+  push:
+    tags:
+       - '*.[sc]'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+name: Check
+jobs:
+  create_release:
+    name: Create release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: Get tag name
+        id: get_tag_name
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      - name: Attempt to Delete Release
+        uses: adigherman/actions/delete-release-by-tag@master
+        id: delete-release
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          tag: ${{ steps.get_tag_name.outputs.VERSION }}
+      - name: Create release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.get_tag_name.outputs.VERSION }}
+          name: Neuroc Release ${{ steps.get_tag_name.outputs.VERSION }}
+
+  neuroconductor_check:
+    needs: create_release
+    runs-on: ${{ matrix.config.os }}
+    name: ${{ matrix.config.os }} (${{ matrix.config.r }})
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {os: macOS-latest,   r: 'oldrel',  r_ver: '4.3.3', latex: "true", vdiffr: false}
+          - {os: macOS-latest,   r: 'release', r_ver: '4.4.3', latex: "true", vdiffr: false}
+          - {os: windows-latest, r: 'oldrel',  r_ver: '4.3.3'}
+          - {os: windows-latest, r: 'release', r_ver: '4.4.0'}
+          - {os: ubuntu-22.04,   r: 'oldrel',  r_ver: '4.3.3', latex: "true"}
+          - {os: ubuntu-22.04,   r: 'release', r_ver: '4.4.3', latex: "true"}
+
+    env:
+      R_REMOTES_NO_ERRORS_FROM_WARNINGS: true
+      TIC_DEPLOY_KEY: ${{ secrets.TIC_DEPLOY_KEY }}
+      RSPM: ${{ matrix.config.rspm }}
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      continue-on-error: ${{ startsWith(matrix.config.r, 'devel') }}
+      VDIFFR_RUN_TESTS: ${{ matrix.config.vdiffr }}
+      CI_BRANCH: "main"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+          r-version: ${{ matrix.config.r }}
+
+      - uses: r-lib/actions/setup-tinytex@v2
+        if: matrix.config.latex == 'true'
+
+      - name: Install additional latex modules
+        if: matrix.config.latex == 'true'
+        run: |
+          tlmgr update --self
+          tlmgr install filecontents upquote courier courier-scaled biber biblatex collection-luatex ae thumbpdf grfext
+          tlmgr update --all
+
+      - uses: r-lib/actions/setup-pandoc@v2
+
+      - name: Setup git identity
+        run: |
+          git config user.name adigherman
+          git config user.email adig@jhu.edu
+
+      - name: Install system dependencies (unix)
+        if: runner.os == 'Linux'
+        uses: adigherman/actions/install-sysdeps-linux@master
+
+      - name: Install system dependencies (macos)
+        if: runner.os == 'macOS'
+        uses: adigherman/actions/install-sysdeps-macos@master
+
+      - name: Setup msys2 (windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: git mingw-w64-x86_64-toolchain
+
+      - name: Install system dependencies (windows)
+        if: runner.os == 'Windows'
+        uses: adigherman/actions/install-sysdeps-windows@master
+
+      - name: Get repo name
+        uses: adigherman/actions/get-repo-name@master
+        id: get-name
+        with:
+          github_slug: ${{ github.repository }}
+
+      - name: Get package version
+        uses: adigherman/actions/get-repo-version@master
+        id: get-version-number
+
+      - name: Get release asset info
+        uses: adigherman/actions/get-release-asset@master
+        id: get-release-asset
+        with:
+          repo_name: ${{ steps.get-name.outputs.repo_name }}
+          repo_version: ${{ steps.get-version-number.outputs.package_version }}
+          runner_os: ${{ runner.os }}
+          R_version: ${{ matrix.config.r_ver }}
+
+      - name: Query dependencies
+        run: |
+          install.packages('remotes')
+          saveRDS(remotes::dev_package_deps(dependencies = TRUE), ".github/depends.Rds", version = 2)
+          writeLines(sprintf("R-%i.%i", getRversion()$major, getRversion()$minor), ".github/R-version")
+        shell: Rscript {0}
+
+      - name: Cache R packages
+        if: runner.os != 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.R_LIBS_USER }}
+          key: ${{ runner.os }}-${{ hashFiles('.github/R-version') }}-1-${{ hashFiles('.github/depends.Rds') }}
+          restore-keys: ${{ runner.os }}-${{ hashFiles('.github/R-version') }}-1-
+
+      - name: Install R and sys dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::covr, any::xml2, any::markdown
+          needs: coverage
+
+      - name: Install helper packages
+        run: |
+          remotes::install_github("ropensci/tic")
+          remotes::install_github("adigherman/ghtravis")
+          remotes::install_github("muschellij2/aghast")
+        shell: Rscript {0}
+
+      - name: Session info
+        run: |
+          options(width = 100)
+          pkgs <- installed.packages()[, "Package"]
+          sessioninfo::session_info(pkgs, include_base = TRUE)
+        shell: Rscript {0}
+
+      - name: "Check"
+        run: |
+          Rscript -e 'tic::script()'
+          ls -l check
+        shell: bash
+
+      - name: Show testthat output
+        if: always()
+        run: find check -name 'testthat.Rout*' -exec cat '{}' \; || true
+        shell: bash
+
+      - name: Upload check results
+        if: failure()
+        uses: actions/upload-artifact@master
+        with:
+          name: ${{ runner.os }}-r${{ matrix.config.r }}-results
+          path: check
+
+      - name: Before Deploy
+        run: |
+          Rscript -e "tic::before_deploy()"
+          cp ${{ steps.get-release-asset.outputs.asset_path }} ${{ steps.get-release-asset.outputs.asset_rename }}
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+           files: ${{ steps.get-release-asset.outputs.asset_rename }}
+
+      - name: Deploy
+        run: Rscript -e "tic::deploy()"
+
+      - name: After Deploy
+        run: Rscript -e "tic::after_deploy()"
+
+
+      - name: Run coverage check
+        continue-on-error: true
+        id: coverage
+        if: ${{ runner.os == 'Linux' && matrix.config.r == 'release' }}
+        run: |
+          Rscript -e 'install.packages("xml2"); cov <- covr::package_coverage(); covr::to_cobertura(cov, filename = "coverage.xml")'
+        shell: bash
+
+      - name: Upload coverage to Coveralls
+        #if: ${{ runner.os == 'Linux' && matrix.config.r == 'release' }}
+        if: steps.coverage.outcome == 'success' 
+        uses: coverallsapp/github-action@v2
